@@ -38,5 +38,6 @@ while True:
 
     # Reenviar la consulta al servidor DNS remoto
     handle_dns_query(data, addr, DNS_SERVER, LISTEN_PORT)
+    print('Respondiendo...')
 
 sock.close()
