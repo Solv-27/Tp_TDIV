@@ -1,5 +1,7 @@
 import socket
 import argparse
+from scapy.all import *
+from scapy import *
 
 # Función para enviar una consulta DNS al servidor remoto y obtener la respuesta
 def send_dns_query(query_data, dns_server, dns_port):
@@ -10,26 +12,49 @@ def send_dns_query(query_data, dns_server, dns_port):
 
 # Función para obtener la dirección IP de la respuesta DNS
 def extract_ip_address(response_data):
-    from dnslib import DNSRecord
-
-    # Analizar el mensaje DNS
-    dns_response = DNSRecord.parse(response_data)
-
-    # Obtener la dirección IP de la respuesta (asumiendo que solo hay una respuesta)
-    ip_address = dns_response.a.rdata if dns_response.a else None
-
+    ip_address = None
+    try:
+        ip_address = socket.inet_ntoa(response_data[-4:])
+    except:
+        pass
     return ip_address
 
 # Función para manipular las consultas DNS entrantes
-def handle_dns_query(data, addr, dns_server, dns_port):
-    response_data = send_dns_query(data, dns_server, dns_port)
-    sock.sendto(response_data, addr)
-    
-    # Obtener la dirección IP de la respuesta DNS
-    ip_address = extract_ip_address(response_data)
-    
-    # Imprimir la dirección IP
-    print(ip_address)
+def handle_dns_query(data, addr, dns_server, dns_port, destination_domain, destination_ip):
+    # Obtener la consulta DNS
+    pkt = DNS(data)
+    query= pkt[DNSQR].qname.decode()
+    query= query[:-1]
+  
+
+    # Obtener el nombre de dominio de la consulta
+    domain = query.split()[0]
+
+    print(f'[*] Consulta recibida: {domain} (de {addr[0]}:{addr[1]})')
+    print(domain)
+
+    if domain != destination_domain:
+        
+        # Enviar la consulta DNS al servidor remoto y obtener la respuesta real
+        response_data = send_dns_query(data, dns_server, dns_port)
+        ip_address = extract_ip_address(response_data)
+
+        if ip_address:
+            print(f'[*] Respondiendo {ip_address} (vía {dns_server})')
+            # Construir la respuesta DNS con la dirección IP real
+            response = f'{domain} A {ip_address}'
+        else:
+            print('[!] No se pudo obtener la respuesta real. Respondiendo con dirección IP predeterminada.')
+            # Construir la respuesta DNS con la dirección IP predeterminada
+            response = f'{domain} A {destination_ip}'
+    else:
+
+        print(f'[*] Respondiendo {destination_ip} (predeterminado)')
+        # Construir la respuesta DNS con la dirección IP predeterminada
+        response = f'{domain} A {destination_ip}'
+
+    # Enviar la respuesta DNS al cliente
+    sock.sendto(response.encode(), addr)
 
 # Analizar argumentos de línea de comandos
 parser = argparse.ArgumentParser(description='Servidor DNS Proxy')
@@ -54,15 +79,12 @@ sock.bind(('0.0.0.0', LISTEN_PORT))
 print(f'Servidor DNS proxy en funcionamiento en el puerto {LISTEN_PORT}...')
 print(f'Servidor DNS remoto: {DNS_SERVER}')
 
+
+
+
 while True:
     # Esperar a recibir una consulta DNS
     data, addr = sock.recvfrom(1024)
-    print('Consulta recibida desde', addr)
 
-    # Reenviar la consulta al servidor DNS remoto
-    if DESTINATION_DOMAIN and DESTINATION_IP:
-        data = data.replace(DESTINATION_DOMAIN.encode(), DESTINATION_IP.encode())
-    handle_dns_query(data, addr, DNS_SERVER, LISTEN_PORT)
-    print('Respondiendo...')
-
-sock.close()
+    # Manipular la consulta DNS
+    handle_dns_query(data, addr, DNS_SERVER, LISTEN_PORT, DESTINATION_DOMAIN, DESTINATION_IP)
