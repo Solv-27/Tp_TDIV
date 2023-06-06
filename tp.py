@@ -20,12 +20,11 @@ def extract_ip_address(response_data):
     return ip_address
 
 # Función para manipular las consultas DNS entrantes
-def handle_dns_query(data, addr, dns_server, dns_port, destination_domain, destination_ip):
+def handle_dns_query(data, addr, dns_server, dns_port, destination_domains, destination_ips):
     # Obtener la consulta DNS
     pkt = DNS(data)
-    query= pkt[DNSQR].qname.decode()
-    query= query[:-1]
-  
+    query = pkt[DNSQR].qname.decode()
+    query = query[:-1]
 
     # Obtener el nombre de dominio de la consulta
     domain = query.split()[0]
@@ -33,8 +32,7 @@ def handle_dns_query(data, addr, dns_server, dns_port, destination_domain, desti
     print(f'[*] Consulta recibida: {domain} (de {addr[0]}:{addr[1]})')
     print(domain)
 
-    if domain != destination_domain:
-        
+    if domain not in destination_domains:
         # Enviar la consulta DNS al servidor remoto y obtener la respuesta real
         response_data = send_dns_query(data, dns_server, dns_port)
         ip_address = extract_ip_address(response_data)
@@ -46,9 +44,10 @@ def handle_dns_query(data, addr, dns_server, dns_port, destination_domain, desti
         else:
             print('[!] No se pudo obtener la respuesta real. Respondiendo con dirección IP predeterminada.')
             # Construir la respuesta DNS con la dirección IP predeterminada
-            response = f'{domain} A {destination_ip}'
+            response = f'{domain} A {destination_ips[0]}'
     else:
-
+        index = destination_domains.index(domain)
+        destination_ip = destination_ips[index]
         print(f'[*] Respondiendo {destination_ip} (predeterminado)')
         # Construir la respuesta DNS con la dirección IP predeterminada
         response = f'{domain} A {destination_ip}'
@@ -60,17 +59,23 @@ def handle_dns_query(data, addr, dns_server, dns_port, destination_domain, desti
 parser = argparse.ArgumentParser(description='Servidor DNS Proxy')
 parser.add_argument('-s', '--server', required=True, help='Servidor DNS remoto')
 parser.add_argument('-p', '--port', type=int, help='Puerto de escucha del servidor DNS proxy')
-parser.add_argument('-d', '--destination', help='Dominio y dirección IP de destino en formato "dominio:ip"')
+parser.add_argument('-d', '--destination', nargs='+', action='append', help='Dominios y direcciones IP de destino en formato "dominio:ip"')
 args = parser.parse_args()
 
 # Obtener el servidor DNS remoto y el puerto de escucha del argumento
 DNS_SERVER = args.server
 LISTEN_PORT = args.port if args.port else 53
 
-# Obtener el dominio y la dirección IP de destino si se proporciona
-destination = args.destination.split(':') if args.destination else ['', '']
-DESTINATION_DOMAIN = destination[0]
-DESTINATION_IP = destination[1] if len(destination) > 1 else ''
+# Obtener los dominios y direcciones IP de destino si se proporcionan
+destination_domains = []
+destination_ips = []
+
+if args.destination:
+    for item in args.destination:
+        for subitem in item:
+            parts = subitem.split(':')
+            destination_domains.append(parts[0])
+            destination_ips.append(parts[1])
 
 # Crear socket UDP
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -79,12 +84,9 @@ sock.bind(('0.0.0.0', LISTEN_PORT))
 print(f'Servidor DNS proxy en funcionamiento en el puerto {LISTEN_PORT}...')
 print(f'Servidor DNS remoto: {DNS_SERVER}')
 
-
-
-
 while True:
     # Esperar a recibir una consulta DNS
     data, addr = sock.recvfrom(1024)
 
     # Manipular la consulta DNS
-    handle_dns_query(data, addr, DNS_SERVER, LISTEN_PORT, DESTINATION_DOMAIN, DESTINATION_IP)
+    handle_dns_query(data, addr, DNS_SERVER, LISTEN_PORT, destination_domains, destination_ips)
